@@ -313,16 +313,31 @@ class GroundingDINO(nn.Module):
             print("pass1-12")
             prompt_mask = torch.ones((batch_size, self.context_length), dtype=attn_mask.dtype, device=attn_mask.device)
             print("pass1-13")
+            if len(attn_mask.shape) != len(prompt_mask.shape):
+                print("pass1-14")
+                if len(attn_mask.shape) > len(prompt_mask.shape):
+                    print("pass1-15")
+                    # Expand prompt_mask to match attn_mask dimensions
+                    for _ in range(len(attn_mask.shape) - len(prompt_mask.shape)):
+                        print("pass1-16")
+                        prompt_mask = prompt_mask.unsqueeze(-1)
+                else:
+                    print("pass1-17")
+                    # Expand attn_mask to match prompt_mask dimensions
+                    for _ in range(len(prompt_mask.shape) - len(attn_mask.shape)):
+                        print("pass1-18")
+                        attn_mask = attn_mask.unsqueeze(-1)
+            print("pass1-19")
             attention_mask = torch.cat([prompt_mask, attn_mask], dim=1)
-            print("pass1-14")
+            print("pass1-20")
             tokenized_for_encoder["attention_mask"] = attention_mask
 
         # Remove input_ids, replace with inputs_embeds
-        print("pass1-15")
+        print("pass1-21")
         tokenized_for_encoder.pop("input_ids")
-        print("pass1-16")
+        print("pass1-22")
         tokenized_for_encoder["inputs_embeds"] = input_embeds
-        print("pass1-17")
+        print("pass1-23")
         bert_output = self.bert(**tokenized_for_encoder)  # bs, 195, 768
 
         '''
