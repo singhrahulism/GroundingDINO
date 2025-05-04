@@ -144,3 +144,6 @@ grounding/version.py
 
 vis/
 tmp/
+groundingdino_swint_ogc.pth
+version.py
+training.ipynb

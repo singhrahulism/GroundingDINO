@@ -299,10 +299,13 @@ class GroundingDINO(nn.Module):
         print("pass1-7")
         input_embeds = self.bert.embeddings(input_ids)  # (B, T, H)
 
+        print("pass1-8")
         # Expand and prepend soft prompt to each batch
         prompt = self.context_prompt.unsqueeze(0).expand(batch_size, -1, -1)  # (B, context_length, H)
+        print("pass1-9")
         input_embeds = torch.cat([prompt, input_embeds], dim=1)  # (B, context_length + T, H)
 
+        print("pass1-10")
         # Adjust attention mask accordingly
         if "attention_mask" in tokenized_for_encoder:
             attn_mask = tokenized_for_encoder["attention_mask"]
