@@ -297,7 +297,7 @@ class GroundingDINO(nn.Module):
 
         # Get token embeddings from input IDs using the BERT embedding layer
         print("pass1-7")
-        input_embeds = self.bert.embeddings.word_embeddings(input_ids)  # (B, T, H)
+        input_embeds = self.bert.embeddings(input_ids)  # (B, T, H)
 
         # Expand and prepend soft prompt to each batch
         prompt = self.context_prompt.unsqueeze(0).expand(batch_size, -1, -1)  # (B, context_length, H)
