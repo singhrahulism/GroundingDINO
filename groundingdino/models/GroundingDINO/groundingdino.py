@@ -105,11 +105,16 @@ class GroundingDINO(nn.Module):
 
         # bert
         self.tokenizer = get_tokenlizer.get_tokenlizer(text_encoder_type)
+        print("pass1-1")
         self.bert = get_tokenlizer.get_pretrained_language_model(text_encoder_type)
+        print("pass1-2")
         self.bert.pooler.dense.weight.requires_grad_(False)
+        print("pass1-3")
         self.bert.pooler.dense.bias.requires_grad_(False)
+        print("pass1-4")
         self.bert = BertModelWarper(bert_model=self.bert)
 
+        print("pass1-5")
         self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
         nn.init.constant_(self.feat_map.bias.data, 0)
         nn.init.xavier_uniform_(self.feat_map.weight.data)
@@ -121,6 +126,7 @@ class GroundingDINO(nn.Module):
         # Customizable Area Start
 
         self.context_length = 5
+        print("pass1-6")
         self.context_prompt = nn.Parameter(torch.randn(self.context_length, self.bert.config.hidden_size))
 
         # Customizable Area End
@@ -289,7 +295,8 @@ class GroundingDINO(nn.Module):
         batch_size = input_ids.shape[0]
 
         # Get token embeddings from input IDs using the BERT embedding layer
-        input_embeds = self.bert.bert.embeddings.word_embeddings(input_ids)  # (B, T, H)
+        print("pass1-7")
+        input_embeds = self.bert.embeddings.word_embeddings(input_ids)  # (B, T, H)
 
         # Expand and prepend soft prompt to each batch
         prompt = self.context_prompt.unsqueeze(0).expand(batch_size, -1, -1)  # (B, context_length, H)
@@ -305,7 +312,7 @@ class GroundingDINO(nn.Module):
         # Remove input_ids, replace with inputs_embeds
         tokenized_for_encoder.pop("input_ids")
         tokenized_for_encoder["inputs_embeds"] = input_embeds
-
+        print("pass1-8")
         bert_output = self.bert(**tokenized_for_encoder)  # bs, 195, 768
 
         '''
