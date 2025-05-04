@@ -73,7 +73,7 @@ class GroundingDINO(nn.Module):
         dn_labelbook_size=100,
         text_encoder_type="bert-base-uncased",
         sub_sentence_present=True,
-        max_text_len=256,
+        max_text_len=256  
     ):
         """Initializes the model.
         Parameters:
@@ -117,6 +117,13 @@ class GroundingDINO(nn.Module):
 
         # special tokens
         self.specical_tokens = self.tokenizer.convert_tokens_to_ids(["[CLS]", "[SEP]", ".", "?"])
+        
+        # Customizable Area Start
+
+        self.context_length = 5
+        self.context_prompt = nn.Parameter(torch.randn(self.context_length, self.bert.config.hidden_size))
+
+        # Customizable Area End
 
         # prepare input projection layers
         if num_feature_levels > 1:
@@ -274,20 +281,57 @@ class GroundingDINO(nn.Module):
             # import ipdb; ipdb.set_trace()
             tokenized_for_encoder = tokenized
 
+        '''
+        Customizable Area Start
+        '''
+
+        input_ids = tokenized_for_encoder["input_ids"]
+        batch_size = input_ids.shape[0]
+
+        # Get token embeddings from input IDs using the BERT embedding layer
+        input_embeds = self.bert.bert.embeddings.word_embeddings(input_ids)  # (B, T, H)
+
+        # Expand and prepend soft prompt to each batch
+        prompt = self.context_prompt.unsqueeze(0).expand(batch_size, -1, -1)  # (B, context_length, H)
+        input_embeds = torch.cat([prompt, input_embeds], dim=1)  # (B, context_length + T, H)
+
+        # Adjust attention mask accordingly
+        if "attention_mask" in tokenized_for_encoder:
+            attn_mask = tokenized_for_encoder["attention_mask"]
+            prompt_mask = torch.ones((batch_size, self.context_length), dtype=attn_mask.dtype, device=attn_mask.device)
+            attention_mask = torch.cat([prompt_mask, attn_mask], dim=1)
+            tokenized_for_encoder["attention_mask"] = attention_mask
+
+        # Remove input_ids, replace with inputs_embeds
+        tokenized_for_encoder.pop("input_ids")
+        tokenized_for_encoder["inputs_embeds"] = input_embeds
+
         bert_output = self.bert(**tokenized_for_encoder)  # bs, 195, 768
+
+        '''
+        Customizable Area End
+        '''
 
         encoded_text = self.feat_map(bert_output["last_hidden_state"])  # bs, 195, d_model
         text_token_mask = tokenized.attention_mask.bool()  # bs, 195
         # text_token_mask: True for nomask, False for mask
         # text_self_attention_masks: True for nomask, False for mask
 
+        '''
+        Customizable Area Start
+        '''
+
         if encoded_text.shape[1] > self.max_text_len:
-            encoded_text = encoded_text[:, : self.max_text_len, :]
-            text_token_mask = text_token_mask[:, : self.max_text_len]
-            position_ids = position_ids[:, : self.max_text_len]
+            encoded_text = encoded_text[:, : self.max_text_len + self.context_length, :]
+            text_token_mask = text_token_mask[:, : self.max_text_len + self.context_length]
+            position_ids = position_ids[:, : self.max_text_len + self.context_length]
             text_self_attention_masks = text_self_attention_masks[
-                :, : self.max_text_len, : self.max_text_len
+                :, : self.max_text_len + self.context_length, : self.max_text_len + self.context_length
             ]
+        
+        '''
+        Customizable Area End
+        '''
 
         text_dict = {
             "encoded_text": encoded_text,  # bs, 195, d_model
