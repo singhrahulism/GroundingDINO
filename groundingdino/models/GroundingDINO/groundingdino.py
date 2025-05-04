@@ -308,22 +308,30 @@ class GroundingDINO(nn.Module):
         print("pass1-10")
         # Adjust attention mask accordingly
         if "attention_mask" in tokenized_for_encoder:
+            print("pass1-11")
             attn_mask = tokenized_for_encoder["attention_mask"]
+            print("pass1-12")
             prompt_mask = torch.ones((batch_size, self.context_length), dtype=attn_mask.dtype, device=attn_mask.device)
+            print("pass1-13")
             attention_mask = torch.cat([prompt_mask, attn_mask], dim=1)
+            print("pass1-14")
             tokenized_for_encoder["attention_mask"] = attention_mask
 
         # Remove input_ids, replace with inputs_embeds
+        print("pass1-15")
         tokenized_for_encoder.pop("input_ids")
+        print("pass1-16")
         tokenized_for_encoder["inputs_embeds"] = input_embeds
-        print("pass1-8")
+        print("pass1-17")
         bert_output = self.bert(**tokenized_for_encoder)  # bs, 195, 768
 
         '''
         Customizable Area End
         '''
 
+        print("pass1-18")
         encoded_text = self.feat_map(bert_output["last_hidden_state"])  # bs, 195, d_model
+        print("pass1-19")
         text_token_mask = tokenized.attention_mask.bool()  # bs, 195
         # text_token_mask: True for nomask, False for mask
         # text_self_attention_masks: True for nomask, False for mask
@@ -332,7 +340,9 @@ class GroundingDINO(nn.Module):
         Customizable Area Start
         '''
 
+        print("pass1-20")
         if encoded_text.shape[1] > self.max_text_len:
+            print("pass1-21")
             encoded_text = encoded_text[:, : self.max_text_len + self.context_length, :]
             text_token_mask = text_token_mask[:, : self.max_text_len + self.context_length]
             position_ids = position_ids[:, : self.max_text_len + self.context_length]
