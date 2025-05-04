@@ -292,6 +292,7 @@ class GroundingDINO(nn.Module):
         '''
 
         input_ids = tokenized_for_encoder["input_ids"]
+        print("input_ids:", input_ids)
         batch_size = input_ids.shape[0]
 
         # Get token embeddings from input IDs using the BERT embedding layer
