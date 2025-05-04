@@ -249,6 +249,7 @@ def generate_masks_with_special_tokens_and_transfer_map(tokenized, special_token
     for i in range(idxs.shape[0]):
         row, col = idxs[i]
         if (col == 0) or (col == num_token - 1):
+        # if (col == 0):
             attention_mask[row, col, col] = True
             position_ids[row, col] = 0
         else:
@@ -256,6 +257,11 @@ def generate_masks_with_special_tokens_and_transfer_map(tokenized, special_token
             position_ids[row, previous_col + 1 : col + 1] = torch.arange(
                 0, col - previous_col, device=input_ids.device
             )
+            c2t_maski = torch.zeros((num_token), device=input_ids.device).bool()
+            c2t_maski[previous_col + 1 : col] = True
+            cate_to_token_mask_list[row].append(c2t_maski)
+        # Handle the last special token case
+        if col == num_token - 1:
             c2t_maski = torch.zeros((num_token), device=input_ids.device).bool()
             c2t_maski[previous_col + 1 : col] = True
             cate_to_token_mask_list[row].append(c2t_maski)
