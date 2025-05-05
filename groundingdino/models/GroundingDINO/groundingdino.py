@@ -111,8 +111,8 @@ class GroundingDINO(nn.Module):
         self.bert = BertModelWarper(bert_model=self.bert)
 
         # soft prompt
-        self.soft_prompt_len = 10
-        self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, self.text_dim))  # [1, soft_len, d_model]
+        self.soft_prompt_len = 6
+        self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, self.bert.config.hidden_size))  # [1, soft_len, d_model]  # [1, soft_len, d_model]
 
         self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
         nn.init.constant_(self.feat_map.bias.data, 0)
