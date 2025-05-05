@@ -359,6 +359,31 @@ class GroundingDINO(nn.Module):
         print("pass19")
         input_query_bbox = input_query_label = attn_mask = dn_meta = None
         print("pass20")
+        
+        def check_batch_dims(name, tensor, dim=0):
+            if isinstance(tensor, list):
+                sizes = [t.shape[dim] for t in tensor]
+                if len(set(sizes)) > 1:
+                    print(f"[!] Mismatch in list '{name}' at dim {dim}: sizes = {sizes}")
+                else:
+                    print(f"[✓] {name}: consistent size {sizes[0]} at dim {dim}")
+            else:
+                print(f"[✓] {name}: shape = {tensor.shape}")
+
+        check_batch_dims("srcs", srcs)
+        check_batch_dims("masks", masks)
+        check_batch_dims("input_query_bbox", input_query_bbox)
+        check_batch_dims("poss", self.poss)
+        check_batch_dims("input_query_label", input_query_label)
+        check_batch_dims("attn_mask", attn_mask)
+
+        text_dict_keys = ["encoded_text", "text_token_mask"]
+        for key in text_dict_keys:
+            if key in text_dict:
+                check_batch_dims(f"text_dict['{key}']", text_dict[key])
+            else:
+                print(f"[!] Missing key in text_dict: {key}")
+
         hs, reference, hs_enc, ref_enc, init_box_proposal = self.transformer(
             srcs, masks, input_query_bbox, self.poss, input_query_label, attn_mask, text_dict
         )
