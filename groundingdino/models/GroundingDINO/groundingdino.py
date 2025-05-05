@@ -319,13 +319,15 @@ class GroundingDINO(nn.Module):
             print(f"Prompt mask shape: {prompt_mask.shape}")
             print("pass1-13")
 
+            attn_mask = attn_mask.contiguous()
             # Ensure the original attention mask is 2D
-            if len(attn_mask.shape) > 2:
-                print("Reshaping original attention mask to 2D")
-                original_seq_len = attn_mask.shape[-1]
-                attn_mask = attn_mask.view(batch_size, original_seq_len)
-            else:
-                original_seq_len = attn_mask.shape[-1]
+            print("pass1-14")
+            if attn_mask.dim() > 2:
+                print("pass1-15")
+                attn_mask = attn_mask.reshape(attn_mask.size(0), -1)
+            print("pass1-16")
+            original_seq_len = attn_mask.shape[-1]
+
 
             print(f"Original sequence length: {original_seq_len}")
 
