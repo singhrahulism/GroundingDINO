@@ -239,17 +239,17 @@ class GroundingDINO(nn.Module):
 
     def forward(self, samples: NestedTensor, targets: List = None, **kw):
         """The forward expects a NestedTensor, which consists of:
-           - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
-           - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
+            - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
+            - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
 
         It returns a dict with the following elements:
-           - "pred_logits": the classification logits (including no-object) for all queries.
+            - "pred_logits": the classification logits (including no-object) for all queries.
                             Shape= [batch_size x num_queries x num_classes]
-           - "pred_boxes": The normalized boxes coordinates for all queries, represented as
-                           (center_x, center_y, width, height). These values are normalized in [0, 1],
-                           relative to the size of each individual image (disregarding possible padding).
-                           See PostProcess for information on how to retrieve the unnormalized bounding box.
-           - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
+            - "pred_boxes": The normalized boxes coordinates for all queries, represented as
+                            (center_x, center_y, width, height). These values are normalized in [0, 1],
+                            relative to the size of each individual image (disregarding possible padding).
+                            See PostProcess for information on how to retrieve the unnormalized bounding box.
+            - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                             dictionnaries containing the two above keys for each decoder layer.
         """
         if targets is None:
@@ -310,7 +310,7 @@ class GroundingDINO(nn.Module):
         # Fix for the attention mask concatenation
         if "attention_mask" in tokenized_for_encoder:
             print("pass1-11")
-            attn_mask = tokenized["attention_mask"]
+            attn_mask = tokenized_for_encoder["attention_mask"]
             print(f"Original attention mask shape: {attn_mask.shape}")
             print("pass1-12")
 
@@ -340,6 +340,21 @@ class GroundingDINO(nn.Module):
             # Update the attention mask in tokenized_for_encoder
             print("pass1-17")
             tokenized_for_encoder["attention_mask"] = attention_mask
+        
+        # If token_type_ids exist, extend them too
+        if "token_type_ids" in tokenized_for_encoder:
+            print("pass1-18")
+            tok_type_ids = tokenized_for_encoder["token_type_ids"]
+            if len(tok_type_ids.shape) > 2:
+                tok_type_ids = tok_type_ids.view(batch_size, -1)
+            prompt_tok_type_ids = torch.zeros((batch_size, self.context_length), dtype=tok_type_ids.dtype, device=tok_type_ids.device)
+            token_type_ids = torch.cat([prompt_tok_type_ids, tok_type_ids], dim=1)
+            print(f"Final token_type_ids shape: {token_type_ids.shape}")
+            tokenized_for_encoder["token_type_ids"] = token_type_ids
+
+        for key, val in tokenized_for_encoder.items():
+            if hasattr(val, 'shape'):
+                print(f"{key} shape: {val.shape}")
 
 
         # Remove input_ids, replace with inputs_embeds
@@ -357,7 +372,7 @@ class GroundingDINO(nn.Module):
         print("pass1-18")
         encoded_text = self.feat_map(bert_output["last_hidden_state"])  # bs, 195, d_model
         print("pass1-19")
-        text_token_mask = tokenized.attention_mask.bool()  # bs, 195
+        text_token_mask = tokenized_for_encoder["attention_mask"].bool()  # bs, 195
         # text_token_mask: True for nomask, False for mask
         # text_self_attention_masks: True for nomask, False for mask
 
