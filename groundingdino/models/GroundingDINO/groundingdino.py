@@ -322,7 +322,8 @@ class GroundingDINO(nn.Module):
             "encoded_text": encoded_text,  # bs, 195, d_model
             "text_token_mask": text_token_mask,  # bs, 195
             "position_ids": position_ids,  # bs, 195
-            "text_self_attention_masks": text_self_attention_masks,  # bs, 195,195
+            "text_self_attention_masks": text_self_attention_masks,  # bs, 195,195,
+            "attention_mask": attn_mask
         }
 
         print("pass15")
