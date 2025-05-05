@@ -359,6 +359,21 @@ class GroundingDINO(nn.Module):
         print("pass19")
         input_query_bbox = input_query_label = attn_mask = dn_meta = None
         print("pass20")
+
+        batch_size = encoded_text.shape[0]
+        device = encoded_text.device
+        num_queries = 900
+        seq_len = encoded_text.shape[1] - self.soft_prompt_len
+
+        if input_query_bbox is None:
+            input_query_bbox = torch.zeros((batch_size, num_queries, 4), device=device)
+
+        if input_query_label is None:
+            input_query_label = torch.zeros((batch_size, num_queries), dtype=torch.long, device=device)
+
+        if attn_mask is None:
+            attn_mask = torch.zeros((batch_size, self.soft_prompt_len + seq_len), dtype=torch.bool, device=device)
+
         
         def check_batch_dims(name, tensor, dim=0):
             if isinstance(tensor, list):
