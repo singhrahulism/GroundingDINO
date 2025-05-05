@@ -307,26 +307,23 @@ class GroundingDINO(nn.Module):
 
         print("pass1-10")
         # Adjust attention mask accordingly
+        # Fix for the attention mask concatenation
         if "attention_mask" in tokenized_for_encoder:
             print("pass1-11")
             attn_mask = tokenized_for_encoder["attention_mask"]
+            print(f"Attention mask shape: {attn_mask.shape}")
             print("pass1-12")
+            
+            # Create a 2D prompt mask
             prompt_mask = torch.ones((batch_size, self.context_length), dtype=attn_mask.dtype, device=attn_mask.device)
+            print(f"Prompt mask shape: {prompt_mask.shape}")
             print("pass1-13")
-            if len(attn_mask.shape) != len(prompt_mask.shape):
-                print("pass1-14")
-                if len(attn_mask.shape) > len(prompt_mask.shape):
-                    print("pass1-15")
-                    # Expand prompt_mask to match attn_mask dimensions
-                    for _ in range(len(attn_mask.shape) - len(prompt_mask.shape)):
-                        print("pass1-16")
-                        prompt_mask = prompt_mask.unsqueeze(-1)
-                else:
-                    print("pass1-17")
-                    # Expand attn_mask to match prompt_mask dimensions
-                    for _ in range(len(prompt_mask.shape) - len(attn_mask.shape)):
-                        print("pass1-18")
-                        attn_mask = attn_mask.unsqueeze(-1)
+            
+            # Make sure attention mask is 2D [batch_size, seq_len]
+            if len(attn_mask.shape) > 2:
+                print("Reshaping attention mask to 2D")
+                attn_mask = attn_mask.view(batch_size, -1)
+            
             print("pass1-19")
             attention_mask = torch.cat([prompt_mask, attn_mask], dim=1)
             print("pass1-20")
