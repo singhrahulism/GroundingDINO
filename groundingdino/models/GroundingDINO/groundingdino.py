@@ -310,7 +310,7 @@ class GroundingDINO(nn.Module):
         # Fix for the attention mask concatenation
         if "attention_mask" in tokenized_for_encoder:
             print("pass1-11")
-            attn_mask = tokenized_for_encoder["attention_mask"]
+            attn_mask = tokenized["attention_mask"]
             print(f"Original attention mask shape: {attn_mask.shape}")
             print("pass1-12")
 
@@ -319,23 +319,26 @@ class GroundingDINO(nn.Module):
             print(f"Prompt mask shape: {prompt_mask.shape}")
             print("pass1-13")
 
-            attn_mask = attn_mask.contiguous()
             # Ensure the original attention mask is 2D
-            print("pass1-14")
-            if attn_mask.dim() > 2:
+            if len(attn_mask.shape) > 2:
+                print("pass1-14")
+                print("Reshaping original attention mask to 2D")
+                original_seq_len = attn_mask.shape[-1]
                 print("pass1-15")
-                attn_mask = attn_mask.reshape(attn_mask.size(0), -1)
-            print("pass1-16")
-            original_seq_len = attn_mask.shape[-1]
-
+                attn_mask = attn_mask.view(batch_size, original_seq_len)
+            else:
+                print("pass1-16")
+                original_seq_len = attn_mask.shape[-1]
 
             print(f"Original sequence length: {original_seq_len}")
 
+            print(f"Concatenating: prompt_mask {prompt_mask.shape} + attn_mask {attn_mask.shape}")
             # Concatenate the prompt mask with the original attention mask
             attention_mask = torch.cat([prompt_mask, attn_mask], dim=1)
             print(f"Final attention mask shape: {attention_mask.shape}")
 
             # Update the attention mask in tokenized_for_encoder
+            print("pass1-17")
             tokenized_for_encoder["attention_mask"] = attention_mask
 
 
@@ -496,4 +499,3 @@ def build_groundingdino(args):
     )
 
     return model
-
