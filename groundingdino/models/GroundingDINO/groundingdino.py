@@ -114,7 +114,8 @@ class GroundingDINO(nn.Module):
         self.soft_prompt_len = 6
         self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, self.bert.config.hidden_size))  # [1, soft_len, d_model]  # [1, soft_len, d_model]
 
-        self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
+        print("pass-init")
+        self.feat_map = nn.Linear(self.bert.config.hidden_size, self.bert.config.hidden_size, bias=True)
         nn.init.constant_(self.feat_map.bias.data, 0)
         nn.init.xavier_uniform_(self.feat_map.weight.data)
         # freeze
