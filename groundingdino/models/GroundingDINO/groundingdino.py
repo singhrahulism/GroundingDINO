@@ -73,7 +73,7 @@ class GroundingDINO(nn.Module):
         dn_labelbook_size=100,
         text_encoder_type="bert-base-uncased",
         sub_sentence_present=True,
-        max_text_len=256  
+        max_text_len=256,
     ):
         """Initializes the model.
         Parameters:
@@ -105,16 +105,15 @@ class GroundingDINO(nn.Module):
 
         # bert
         self.tokenizer = get_tokenlizer.get_tokenlizer(text_encoder_type)
-        print("pass1-1")
         self.bert = get_tokenlizer.get_pretrained_language_model(text_encoder_type)
-        print("pass1-2")
         self.bert.pooler.dense.weight.requires_grad_(False)
-        print("pass1-3")
         self.bert.pooler.dense.bias.requires_grad_(False)
-        print("pass1-4")
         self.bert = BertModelWarper(bert_model=self.bert)
 
-        print("pass1-5")
+        # soft prompt
+        self.soft_prompt_len = 10
+        self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, self.text_dim))  # [1, soft_len, d_model]
+
         self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
         nn.init.constant_(self.feat_map.bias.data, 0)
         nn.init.xavier_uniform_(self.feat_map.weight.data)
@@ -122,14 +121,6 @@ class GroundingDINO(nn.Module):
 
         # special tokens
         self.specical_tokens = self.tokenizer.convert_tokens_to_ids(["[CLS]", "[SEP]", ".", "?"])
-        
-        # Customizable Area Start
-
-        self.context_length = 5
-        print("pass1-6")
-        self.context_prompt = nn.Parameter(torch.randn(self.context_length, self.bert.config.hidden_size))
-
-        # Customizable Area End
 
         # prepare input projection layers
         if num_feature_levels > 1:
@@ -239,17 +230,17 @@ class GroundingDINO(nn.Module):
 
     def forward(self, samples: NestedTensor, targets: List = None, **kw):
         """The forward expects a NestedTensor, which consists of:
-            - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
-            - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
+           - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
+           - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
 
         It returns a dict with the following elements:
-            - "pred_logits": the classification logits (including no-object) for all queries.
+           - "pred_logits": the classification logits (including no-object) for all queries.
                             Shape= [batch_size x num_queries x num_classes]
-            - "pred_boxes": The normalized boxes coordinates for all queries, represented as
-                            (center_x, center_y, width, height). These values are normalized in [0, 1],
-                            relative to the size of each individual image (disregarding possible padding).
-                            See PostProcess for information on how to retrieve the unnormalized bounding box.
-            - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
+           - "pred_boxes": The normalized boxes coordinates for all queries, represented as
+                           (center_x, center_y, width, height). These values are normalized in [0, 1],
+                           relative to the size of each individual image (disregarding possible padding).
+                           See PostProcess for information on how to retrieve the unnormalized bounding box.
+           - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                             dictionnaries containing the two above keys for each decoder layer.
         """
         if targets is None:
@@ -287,113 +278,45 @@ class GroundingDINO(nn.Module):
             # import ipdb; ipdb.set_trace()
             tokenized_for_encoder = tokenized
 
-        '''
-        Customizable Area Start
-        '''
-
-        input_ids = tokenized_for_encoder["input_ids"]
-        print("input_ids:", input_ids)
-        batch_size = input_ids.shape[0]
-
-        # Get token embeddings from input IDs using the BERT embedding layer
-        print("pass1-7")
-        input_embeds = self.bert.embeddings(input_ids)  # (B, T, H)
-
-        print("pass1-8")
-        # Expand and prepend soft prompt to each batch
-        prompt = self.context_prompt.unsqueeze(0).expand(batch_size, -1, -1)  # (B, context_length, H)
-        print("pass1-9")
-        input_embeds = torch.cat([prompt, input_embeds], dim=1)  # (B, context_length + T, H)
-
-        print("pass1-10")
-        # Adjust attention mask accordingly
-        # Fix for the attention mask concatenation
-        if "attention_mask" in tokenized_for_encoder:
-            print("pass1-11")
-            attn_mask = tokenized_for_encoder["attention_mask"]
-            print(f"Original attention mask shape: {attn_mask.shape}")
-            print("pass1-12")
-
-            batch_size = input_ids.shape[0]
-            prompt_mask = torch.ones((batch_size, self.context_length), dtype=attn_mask.dtype, device=attn_mask.device)
-            print(f"Prompt mask shape: {prompt_mask.shape}")
-            print("pass1-13")
-
-            # Ensure the original attention mask is 2D
-            if len(attn_mask.shape) > 2:
-                print("pass1-14")
-                print("Reshaping original attention mask to 2D")
-                original_seq_len = attn_mask.shape[-1]
-                print("pass1-15")
-                attn_mask = attn_mask.view(batch_size, original_seq_len)
-            else:
-                print("pass1-16")
-                original_seq_len = attn_mask.shape[-1]
-
-            print(f"Original sequence length: {original_seq_len}")
-
-            print(f"Concatenating: prompt_mask {prompt_mask.shape} + attn_mask {attn_mask.shape}")
-            # Concatenate the prompt mask with the original attention mask
-            attention_mask = torch.cat([prompt_mask, attn_mask], dim=1)
-            print(f"Final attention mask shape: {attention_mask.shape}")
-
-            # Update the attention mask in tokenized_for_encoder
-            print("pass1-17")
-            tokenized_for_encoder["attention_mask"] = attention_mask
-        
-        # If token_type_ids exist, extend them too
-        if "token_type_ids" in tokenized_for_encoder:
-            print("pass1-18")
-            tok_type_ids = tokenized_for_encoder["token_type_ids"]
-            if len(tok_type_ids.shape) > 2:
-                tok_type_ids = tok_type_ids.view(batch_size, -1)
-            prompt_tok_type_ids = torch.zeros((batch_size, self.context_length), dtype=tok_type_ids.dtype, device=tok_type_ids.device)
-            token_type_ids = torch.cat([prompt_tok_type_ids, tok_type_ids], dim=1)
-            print(f"Final token_type_ids shape: {token_type_ids.shape}")
-            tokenized_for_encoder["token_type_ids"] = token_type_ids
-
-        for key, val in tokenized_for_encoder.items():
-            if hasattr(val, 'shape'):
-                print(f"{key} shape: {val.shape}")
-
-
-        # Remove input_ids, replace with inputs_embeds
-        print("pass1-21")
-        tokenized_for_encoder.pop("input_ids")
-        print("pass1-22")
-        tokenized_for_encoder["inputs_embeds"] = input_embeds
-        print("pass1-23")
+        print("pass1")
         bert_output = self.bert(**tokenized_for_encoder)  # bs, 195, 768
 
-        '''
-        Customizable Area End
-        '''
+        print("pass2")
+        encoded_text = self.feat_map(bert_output["last_hidden_state"])  # bs, seq_len, d_model
 
-        print("pass1-18")
-        encoded_text = self.feat_map(bert_output["last_hidden_state"])  # bs, 195, d_model
-        print("pass1-19")
-        text_token_mask = tokenized_for_encoder["attention_mask"].bool()  # bs, 195
+        print("pass3")
+        batch_size = encoded_text.shape[0]
+        print("pass4")
+        soft_prompt = self.soft_prompt.expand(batch_size, -1, -1)  # [bs, soft_len, d_model]
+
+        print("pass5")
+        # Prepend soft prompt to encoded text
+        encoded_text = torch.cat([soft_prompt, encoded_text], dim=1)  # [bs, soft_len + seq_len, d_model]
+
+        print("pass6")
+        text_token_mask = tokenized.attention_mask.bool()  # bs, 195
+        print("pass7")
+        soft_mask = torch.ones((batch_size, self.soft_prompt_len), dtype=torch.bool, device=encoded_text.device)
+        print("pass8")
+        text_token_mask = torch.cat([soft_mask, text_token_mask], dim=1)  # [bs, soft_len + seq_len]
+
         # text_token_mask: True for nomask, False for mask
         # text_self_attention_masks: True for nomask, False for mask
 
-        '''
-        Customizable Area Start
-        '''
-
-        print("pass1-20")
+        print("pass9")
         if encoded_text.shape[1] > self.max_text_len:
-            print("pass1-21")
-            encoded_text = encoded_text[:, : self.max_text_len + self.context_length, :]
-            text_token_mask = text_token_mask[:, : self.max_text_len + self.context_length]
-            position_ids = position_ids[:, : self.max_text_len + self.context_length]
+            print("pass10")
+            encoded_text = encoded_text[:, : self.max_text_len, :]
+            print("pass11")
+            text_token_mask = text_token_mask[:, : self.max_text_len]
+            print("pass12")
+            position_ids = position_ids[:, : self.max_text_len]
+            print("pass13")
             text_self_attention_masks = text_self_attention_masks[
-                :, : self.max_text_len + self.context_length, : self.max_text_len + self.context_length
+                :, : self.max_text_len, : self.max_text_len
             ]
-        
-        '''
-        Customizable Area End
-        '''
 
+        print("pass14")
         text_dict = {
             "encoded_text": encoded_text,  # bs, 195, d_model
             "text_token_mask": text_token_mask,  # bs, 195
