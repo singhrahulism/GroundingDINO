@@ -318,16 +318,22 @@ class GroundingDINO(nn.Module):
             prompt_mask = torch.ones((batch_size, self.context_length), dtype=attn_mask.dtype, device=attn_mask.device)
             print(f"Prompt mask shape: {prompt_mask.shape}")
             print("pass1-13")
-            
+
             # Make sure attention mask is 2D [batch_size, seq_len]
             if len(attn_mask.shape) > 2:
                 print("Reshaping attention mask to 2D")
                 attn_mask = attn_mask.view(batch_size, -1)
+
+            seq_len = attn_mask.shape[1]
+            print(f"Sequence length: {seq_len}")
             
-            print("pass1-19")
+            # Concatenate prompt mask and attention mask
             attention_mask = torch.cat([prompt_mask, attn_mask], dim=1)
-            print("pass1-20")
+            print(f"Final attention mask shape: {attention_mask.shape}")
+            
+            # Update the attention mask
             tokenized_for_encoder["attention_mask"] = attention_mask
+
 
         # Remove input_ids, replace with inputs_embeds
         print("pass1-21")
