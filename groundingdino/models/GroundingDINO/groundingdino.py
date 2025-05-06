@@ -111,9 +111,14 @@ class GroundingDINO(nn.Module):
         self.bert = BertModelWarper(bert_model=self.bert)
 
         # soft prompt
-        self.soft_prompt_len = 6
+        # self.soft_prompt_len = 6
         # self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, self.bert.config.hidden_size))  # [1, soft_len, d_model]  # [1, soft_len, d_model]
-        self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, 256))
+        # self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, 256))
+        self.soft_prompt_length = 6  # Number of soft prompt tokens
+        self.soft_prompt_embeddings = nn.Parameter(
+            torch.randn(self.soft_prompt_length, self.bert.config.hidden_size)
+        )
+
         print("pass-init")
         self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
         nn.init.constant_(self.feat_map.bias.data, 0)
@@ -231,17 +236,17 @@ class GroundingDINO(nn.Module):
 
     def forward(self, samples: NestedTensor, targets: List = None, **kw):
         """The forward expects a NestedTensor, which consists of:
-           - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
-           - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
+        - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
+        - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
 
         It returns a dict with the following elements:
-           - "pred_logits": the classification logits (including no-object) for all queries.
+        - "pred_logits": the classification logits (including no-object) for all queries.
                             Shape= [batch_size x num_queries x num_classes]
-           - "pred_boxes": The normalized boxes coordinates for all queries, represented as
-                           (center_x, center_y, width, height). These values are normalized in [0, 1],
-                           relative to the size of each individual image (disregarding possible padding).
-                           See PostProcess for information on how to retrieve the unnormalized bounding box.
-           - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
+        - "pred_boxes": The normalized boxes coordinates for all queries, represented as
+                        (center_x, center_y, width, height). These values are normalized in [0, 1],
+                        relative to the size of each individual image (disregarding possible padding).
+                        See PostProcess for information on how to retrieve the unnormalized bounding box.
+        - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                             dictionnaries containing the two above keys for each decoder layer.
         """
         if targets is None:
@@ -276,73 +281,75 @@ class GroundingDINO(nn.Module):
             tokenized_for_encoder["attention_mask"] = text_self_attention_masks
             tokenized_for_encoder["position_ids"] = position_ids
         else:
-            # import ipdb; ipdb.set_trace()
             tokenized_for_encoder = tokenized
 
-        print("pass1")
-        bert_output = self.bert(**tokenized_for_encoder)  # bs, 195, 768
-
-        print("pass2")
-        encoded_text = self.feat_map(bert_output["last_hidden_state"])  # bs, seq_len, d_model
-
-        print("pass3")
-        batch_size = encoded_text.shape[0]
-        print("pass4")
-        soft_prompt = self.soft_prompt.expand(batch_size, -1, -1)  # [bs, soft_len, d_model]
-
-        print("pass5")
-        # Prepend soft prompt to encoded text
-        encoded_text = torch.cat([soft_prompt, encoded_text], dim=1)  # [bs, soft_len + seq_len, d_model]
-
-        print("pass6")
-        text_token_mask = tokenized.attention_mask.bool()  # bs, 195
-        print("pass7")
-        soft_mask = torch.ones((batch_size, self.soft_prompt_len), dtype=torch.bool, device=encoded_text.device)
-        print("pass8")
-        text_token_mask = torch.cat([soft_mask, text_token_mask], dim=1)  # [bs, soft_len + seq_len]
-
-        # text_token_mask: True for nomask, False for mask
-        # text_self_attention_masks: True for nomask, False for mask
-
-        print("pass9")
+        bert_output = self.bert(**tokenized_for_encoder)  # bs, seq_len, hidden_size
+        bert_embeddings = bert_output["last_hidden_state"]  # bs, seq_len, hidden_size
+        
+        # Apply soft prompting - prepend the learnable embeddings to each sequence in the batch
+        batch_size = bert_embeddings.shape[0]
+        soft_prompt_expanded = self.soft_prompt_embeddings.unsqueeze(0).expand(batch_size, -1, -1)  # bs, soft_prompt_length, hidden_size
+        
+        # Concatenate the soft prompt embeddings with the BERT output embeddings
+        enhanced_embeddings = torch.cat([soft_prompt_expanded, bert_embeddings], dim=1)  # bs, (soft_prompt_length + seq_len), hidden_size
+        
+        # Update masks to account for the added soft prompt tokens
+        # Expand text_token_mask
+        soft_prompt_mask = torch.ones(batch_size, self.soft_prompt_length, device=tokenized["attention_mask"].device, dtype=torch.bool)
+        enhanced_text_token_mask = torch.cat([soft_prompt_mask, tokenized["attention_mask"].bool()], dim=1)
+        
+        # Expand position_ids (assuming sequential positioning)
+        soft_prompt_positions = torch.arange(0, self.soft_prompt_length, device=position_ids.device).unsqueeze(0).expand(batch_size, -1)
+        enhanced_position_ids = torch.cat([soft_prompt_positions, position_ids + self.soft_prompt_length], dim=1)
+        
+        # Expand attention mask matrix
+        soft_prompt_attn_mask = torch.ones(
+            batch_size, self.soft_prompt_length, self.soft_prompt_length, device=text_self_attention_masks.device, dtype=torch.bool
+        )
+        
+        # Create cross-attention masks between soft prompt and original tokens
+        soft_to_text_mask = torch.ones(
+            batch_size, self.soft_prompt_length, text_self_attention_masks.shape[2], device=text_self_attention_masks.device, dtype=torch.bool
+        )
+        text_to_soft_mask = torch.ones(
+            batch_size, text_self_attention_masks.shape[1], self.soft_prompt_length, device=text_self_attention_masks.device, dtype=torch.bool
+        )
+        
+        # Combine all masks into the enhanced attention mask
+        top_part = torch.cat([soft_prompt_attn_mask, soft_to_text_mask], dim=2)
+        bottom_part = torch.cat([text_to_soft_mask, text_self_attention_masks], dim=2)
+        enhanced_text_self_attention_masks = torch.cat([top_part, bottom_part], dim=1)
+        
+        # Apply the feature mapping to the enhanced embeddings
+        encoded_text = self.feat_map(enhanced_embeddings)  # bs, (soft_prompt_length + seq_len), d_model
+        
+        # Check if we need to truncate due to max_text_len constraint
         if encoded_text.shape[1] > self.max_text_len:
-            print("pass10")
-            encoded_text = encoded_text[:, : self.max_text_len, :]
-            print("pass11")
-            text_token_mask = text_token_mask[:, : self.max_text_len]
-            print("pass12")
-            position_ids = position_ids[:, : self.max_text_len]
-            print("pass13")
-            text_self_attention_masks = text_self_attention_masks[
-                :, : self.max_text_len, : self.max_text_len
-            ]
+            encoded_text = encoded_text[:, :self.max_text_len, :]
+            enhanced_text_token_mask = enhanced_text_token_mask[:, :self.max_text_len]
+            enhanced_position_ids = enhanced_position_ids[:, :self.max_text_len]
+            enhanced_text_self_attention_masks = enhanced_text_self_attention_masks[:, :self.max_text_len, :self.max_text_len]
 
-        print("pass14")
         text_dict = {
-            "encoded_text": encoded_text,  # bs, 195, d_model
-            "text_token_mask": text_token_mask,  # bs, 195
-            "position_ids": position_ids,  # bs, 195
-            "text_self_attention_masks": text_self_attention_masks,  # bs, 195,195,
-            "attention_mask": attn_mask
+            "encoded_text": encoded_text,  # bs, (soft_prompt_length + seq_len), d_model
+            "text_token_mask": enhanced_text_token_mask,  # bs, (soft_prompt_length + seq_len)
+            "position_ids": enhanced_position_ids,  # bs, (soft_prompt_length + seq_len)
+            "text_self_attention_masks": enhanced_text_self_attention_masks,  # bs, (soft_prompt_length + seq_len), (soft_prompt_length + seq_len)
         }
 
-        print("pass15")
-        # import ipdb; ipdb.set_trace()
+        # Rest of the forward function remains the same
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        print("pass16")
         if not hasattr(self, 'features') or not hasattr(self, 'poss'):
             self.set_image_tensor(samples)
 
         srcs = []
         masks = []
-        print("pass17")
         for l, feat in enumerate(self.features):
             src, mask = feat.decompose()
             srcs.append(self.input_proj[l](src))
             masks.append(mask)
             assert mask is not None
-        print("pass18")
         if self.num_feature_levels > len(srcs):
             _len_srcs = len(srcs)
             for l in range(_len_srcs, self.num_feature_levels):
@@ -357,55 +364,12 @@ class GroundingDINO(nn.Module):
                 masks.append(mask)
                 self.poss.append(pos_l)
 
-        print("pass19")
         input_query_bbox = input_query_label = attn_mask = dn_meta = None
-        print("pass20")
-
-        batch_size = encoded_text.shape[0]
-        device = encoded_text.device
-        num_queries = 900
-        seq_len = encoded_text.shape[1] - self.soft_prompt_len
-
-        if input_query_bbox is None:
-            input_query_bbox = torch.zeros((batch_size, num_queries, 4), device=device)
-
-        if input_query_label is None:
-            input_query_label = torch.zeros((batch_size, num_queries), dtype=torch.long, device=device)
-
-        if attn_mask is None:
-            attn_mask = torch.zeros((batch_size, self.soft_prompt_len + seq_len), dtype=torch.bool, device=device)
-
-        
-        def check_batch_dims(name, tensor, dim=0):
-            if isinstance(tensor, list):
-                sizes = [t.shape[dim] for t in tensor]
-                if len(set(sizes)) > 1:
-                    print(f"[!] Mismatch in list '{name}' at dim {dim}: sizes = {sizes}")
-                else:
-                    print(f"[✓] {name}: consistent size {sizes[0]} at dim {dim}")
-            else:
-                print(f"[✓] {name}: shape = {tensor.shape}")
-
-        check_batch_dims("srcs", srcs)
-        check_batch_dims("masks", masks)
-        check_batch_dims("input_query_bbox", input_query_bbox)
-        check_batch_dims("poss", self.poss)
-        check_batch_dims("input_query_label", input_query_label)
-        check_batch_dims("attn_mask", attn_mask)
-
-        text_dict_keys = ["encoded_text", "text_token_mask"]
-        for key in text_dict_keys:
-            if key in text_dict:
-                check_batch_dims(f"text_dict['{key}']", text_dict[key])
-            else:
-                print(f"[!] Missing key in text_dict: {key}")
-
         hs, reference, hs_enc, ref_enc, init_box_proposal = self.transformer(
             srcs, masks, input_query_bbox, self.poss, input_query_label, attn_mask, text_dict
         )
 
         # deformable-detr-like anchor update
-        print("pass21")
         outputs_coord_list = []
         for dec_lid, (layer_ref_sig, layer_bbox_embed, layer_hs) in enumerate(
             zip(reference[:-1], self.bbox_embed, hs)
@@ -416,7 +380,6 @@ class GroundingDINO(nn.Module):
             outputs_coord_list.append(layer_outputs_unsig)
         outputs_coord_list = torch.stack(outputs_coord_list)
 
-        print("pass22")
         # output
         outputs_class = torch.stack(
             [
@@ -424,28 +387,13 @@ class GroundingDINO(nn.Module):
                 for layer_cls_embed, layer_hs in zip(self.class_embed, hs)
             ]
         )
-        print("pass23")
         out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord_list[-1]}
 
-        # # for intermediate outputs
-        # if self.aux_loss:
-        #     out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord_list)
-
-        # # for encoder output
-        # if hs_enc is not None:
-        #     # prepare intermediate outputs
-        #     interm_coord = ref_enc[-1]
-        #     interm_class = self.transformer.enc_out_class_embed(hs_enc[-1], text_dict)
-        #     out['interm_outputs'] = {'pred_logits': interm_class, 'pred_boxes': interm_coord}
-        #     out['interm_outputs_for_matching_pre'] = {'pred_logits': interm_class, 'pred_boxes': init_box_proposal}
-        print("pass24")
         unset_image_tensor = kw.get('unset_image_tensor', True)
-        print("pass25")
         if unset_image_tensor:
             self.unset_image_tensor() ## If necessary
-        print("pass26")
         return out
-
+    
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord):
         # this is a workaround to make torchscript happy, as torchscript
