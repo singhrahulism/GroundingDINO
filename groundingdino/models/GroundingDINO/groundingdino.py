@@ -120,6 +120,7 @@ class GroundingDINO(nn.Module):
         self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
         nn.init.constant_(self.feat_map.bias.data, 0)
         nn.init.xavier_uniform_(self.feat_map.weight.data)
+        self.feat_norm = nn.BatchNorm1d(self.hidden_dim)
         # freeze
 
         # special tokens
@@ -321,19 +322,22 @@ class GroundingDINO(nn.Module):
         
         # Apply the feature mapping to the enhanced embeddings
         encoded_text = self.feat_map(enhanced_embeddings)  # bs, (soft_prompt_length + seq_len), d_model
+        encoded_text_normalized = self.feat_norm(encoded_text.transpose(1, 2)).transpose(1, 2) # Apply norm
 
         print("encoded_text Min:", encoded_text.min().item())
         print("encoded_text Max:", encoded_text.max().item())
+        print("encoded_text_normalized Min:", encoded_text_normalized.min().item())
+        print("encoded_text_normalized Max:", encoded_text_normalized.max().item())
         
         # Check if we need to truncate due to max_text_len constraint
-        if encoded_text.shape[1] > self.max_text_len:
-            encoded_text = encoded_text[:, :self.max_text_len, :]
+        if encoded_text_normalized.shape[1] > self.max_text_len:
+            encoded_text_normalized = encoded_text_normalized[:, :self.max_text_len, :]
             enhanced_text_token_mask = enhanced_text_token_mask[:, :self.max_text_len]
             enhanced_position_ids = enhanced_position_ids[:, :self.max_text_len]
             enhanced_text_self_attention_masks = enhanced_text_self_attention_masks[:, :self.max_text_len, :self.max_text_len]
 
         text_dict = {
-            "encoded_text": encoded_text,  # bs, (soft_prompt_length + seq_len), d_model
+            "encoded_text": encoded_text_normalized,  # bs, (soft_prompt_length + seq_len), d_model
             "text_token_mask": enhanced_text_token_mask,  # bs, (soft_prompt_length + seq_len)
             "position_ids": enhanced_position_ids,  # bs, (soft_prompt_length + seq_len)
             "text_self_attention_masks": enhanced_text_self_attention_masks,  # bs, (soft_prompt_length + seq_len), (soft_prompt_length + seq_len)
