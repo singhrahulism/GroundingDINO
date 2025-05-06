@@ -111,9 +111,6 @@ class GroundingDINO(nn.Module):
         self.bert = BertModelWarper(bert_model=self.bert)
 
         # soft prompt
-        # self.soft_prompt_len = 6
-        # self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, self.bert.config.hidden_size))  # [1, soft_len, d_model]  # [1, soft_len, d_model]
-        # self.soft_prompt = nn.Parameter(torch.randn(1, self.soft_prompt_len, 256))
         self.soft_prompt_length = 6  # Number of soft prompt tokens
         self.soft_prompt_embeddings = nn.Parameter(
             torch.randn(self.soft_prompt_length, self.bert.config.hidden_size)
@@ -254,7 +251,6 @@ class GroundingDINO(nn.Module):
         else:
             captions = [t["caption"] for t in targets]
 
-        print("pass--1")
         # encoder texts
         tokenized = self.tokenizer(captions, padding="longest", return_tensors="pt").to(
             samples.device
@@ -267,7 +263,6 @@ class GroundingDINO(nn.Module):
             tokenized, self.specical_tokens, self.tokenizer
         )
 
-        print("pass--2")
         if text_self_attention_masks.shape[1] > self.max_text_len:
             text_self_attention_masks = text_self_attention_masks[
                 :, : self.max_text_len, : self.max_text_len
@@ -277,7 +272,6 @@ class GroundingDINO(nn.Module):
             tokenized["attention_mask"] = tokenized["attention_mask"][:, : self.max_text_len]
             tokenized["token_type_ids"] = tokenized["token_type_ids"][:, : self.max_text_len]
 
-        print("pass--3")
         # extract text embeddings
         if self.sub_sentence_present:
             tokenized_for_encoder = {k: v for k, v in tokenized.items() if k != "attention_mask"}
@@ -286,70 +280,52 @@ class GroundingDINO(nn.Module):
         else:
             tokenized_for_encoder = tokenized
 
-        print("pass--4")
         bert_output = self.bert(**tokenized_for_encoder)  # bs, seq_len, hidden_size
-        print("pass--5")
         bert_embeddings = bert_output["last_hidden_state"]  # bs, seq_len, hidden_size
         
-        print("pass--6")
         # Apply soft prompting - prepend the learnable embeddings to each sequence in the batch
         batch_size = bert_embeddings.shape[0]
-        print("pass--7")
         soft_prompt_expanded = self.soft_prompt_embeddings.unsqueeze(0).expand(batch_size, -1, -1)  # bs, soft_prompt_length, hidden_size
         
-        print("pass--8")
         # Concatenate the soft prompt embeddings with the BERT output embeddings
         enhanced_embeddings = torch.cat([soft_prompt_expanded, bert_embeddings], dim=1)  # bs, (soft_prompt_length + seq_len), hidden_size
         
         # Update masks to account for the added soft prompt tokens
         # Expand text_token_mask
-        print("pass--9")
         soft_prompt_mask = torch.ones(batch_size, self.soft_prompt_length, device=tokenized["attention_mask"].device, dtype=torch.bool)
-        print("pass--10")
         enhanced_text_token_mask = torch.cat([soft_prompt_mask, tokenized["attention_mask"].bool()], dim=1)
         
         # Expand position_ids (assuming sequential positioning)
-        print("pass--11")
         soft_prompt_positions = torch.arange(0, self.soft_prompt_length, device=position_ids.device).unsqueeze(0).expand(batch_size, -1)
-        print("pass--12")
         enhanced_position_ids = torch.cat([soft_prompt_positions, position_ids + self.soft_prompt_length], dim=1)
         
         # Expand attention mask matrix
-        print("pass--13")
         soft_prompt_attn_mask = torch.ones(
             batch_size, self.soft_prompt_length, self.soft_prompt_length, device=text_self_attention_masks.device, dtype=torch.bool
         )
-        
-        print("pass--14")
         # Create cross-attention masks between soft prompt and original tokens
         soft_to_text_mask = torch.ones(
             batch_size, self.soft_prompt_length, text_self_attention_masks.shape[2], device=text_self_attention_masks.device, dtype=torch.bool
         )
-        print("pass--15")
         text_to_soft_mask = torch.ones(
             batch_size, text_self_attention_masks.shape[1], self.soft_prompt_length, device=text_self_attention_masks.device, dtype=torch.bool
         )
         
         # Combine all masks into the enhanced attention mask
-        print("pass--16")
         top_part = torch.cat([soft_prompt_attn_mask, soft_to_text_mask], dim=2)
-        print("pass--17")
         bottom_part = torch.cat([text_to_soft_mask, text_self_attention_masks], dim=2)
-        print("pass--18")
         enhanced_text_self_attention_masks = torch.cat([top_part, bottom_part], dim=1)
         
         # Apply the feature mapping to the enhanced embeddings
         encoded_text = self.feat_map(enhanced_embeddings)  # bs, (soft_prompt_length + seq_len), d_model
         
         # Check if we need to truncate due to max_text_len constraint
-        print("pass--20")
         if encoded_text.shape[1] > self.max_text_len:
             encoded_text = encoded_text[:, :self.max_text_len, :]
             enhanced_text_token_mask = enhanced_text_token_mask[:, :self.max_text_len]
             enhanced_position_ids = enhanced_position_ids[:, :self.max_text_len]
             enhanced_text_self_attention_masks = enhanced_text_self_attention_masks[:, :self.max_text_len, :self.max_text_len]
 
-        print("pass--21")
         text_dict = {
             "encoded_text": encoded_text,  # bs, (soft_prompt_length + seq_len), d_model
             "text_token_mask": enhanced_text_token_mask,  # bs, (soft_prompt_length + seq_len)
@@ -357,14 +333,12 @@ class GroundingDINO(nn.Module):
             "text_self_attention_masks": enhanced_text_self_attention_masks,  # bs, (soft_prompt_length + seq_len), (soft_prompt_length + seq_len)
         }
 
-        print("pass--22")
         # Rest of the forward function remains the same
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
         if not hasattr(self, 'features') or not hasattr(self, 'poss'):
             self.set_image_tensor(samples)
 
-        print("pass--23")
         srcs = []
         masks = []
         for l, feat in enumerate(self.features):
@@ -386,14 +360,11 @@ class GroundingDINO(nn.Module):
                 masks.append(mask)
                 self.poss.append(pos_l)
 
-        print("pass--24")
         input_query_bbox = input_query_label = attn_mask = dn_meta = None
-        print("pass--25")
         hs, reference, hs_enc, ref_enc, init_box_proposal = self.transformer(
             srcs, masks, input_query_bbox, self.poss, input_query_label, attn_mask, text_dict
         )
 
-        print("pass--26")
         # deformable-detr-like anchor update
         outputs_coord_list = []
         for dec_lid, (layer_ref_sig, layer_bbox_embed, layer_hs) in enumerate(
