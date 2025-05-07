@@ -111,7 +111,7 @@ class GroundingDINO(nn.Module):
         self.bert = BertModelWarper(bert_model=self.bert)
 
         # soft prompt
-        self.soft_prompt_length = 6  # Number of soft prompt tokens
+        self.soft_prompt_length = 10  # Number of soft prompt tokens
         self.soft_prompt_embeddings = nn.Parameter(
             torch.randn(self.soft_prompt_length, self.bert.config.hidden_size)
         )
