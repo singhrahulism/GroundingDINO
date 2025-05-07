@@ -290,9 +290,6 @@ class GroundingDINO(nn.Module):
         
         # Concatenate the soft prompt embeddings with the BERT output embeddings
         enhanced_embeddings = torch.cat([soft_prompt_expanded, bert_embeddings], dim=1)  # bs, (soft_prompt_length + seq_len), hidden_size
-
-        print("enhanced_embeddings Min:", enhanced_embeddings.min().item())
-        print("enhanced_embeddings Max:", enhanced_embeddings.max().item())
         
         # Update masks to account for the added soft prompt tokens
         # Expand text_token_mask
@@ -323,11 +320,6 @@ class GroundingDINO(nn.Module):
         # Apply the feature mapping to the enhanced embeddings
         encoded_text = self.feat_map(enhanced_embeddings)  # bs, (soft_prompt_length + seq_len), d_model
         encoded_text_normalized = self.feat_norm(encoded_text.transpose(1, 2)).transpose(1, 2) # Apply norm
-
-        print("encoded_text Min:", encoded_text.min().item())
-        print("encoded_text Max:", encoded_text.max().item())
-        print("encoded_text_normalized Min:", encoded_text_normalized.min().item())
-        print("encoded_text_normalized Max:", encoded_text_normalized.max().item())
         
         # Check if we need to truncate due to max_text_len constraint
         if encoded_text_normalized.shape[1] > self.max_text_len:
